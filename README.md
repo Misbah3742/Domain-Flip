@@ -93,8 +93,16 @@ FastAPI application exposing:
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in real API keys and passwords
+# Edit .env and fill in credentials
 ```
+
+For local testing without registrar API keys, set:
+
+```bash
+SNIPER_DRY_RUN=true
+```
+
+In dry-run mode, the sniper uses a mock registrar and does not place real orders.
 
 ### 2. Launch the full stack
 
@@ -136,6 +144,7 @@ pytest tests/ -v
 | MONITOR_MAX_WORKERS              | 10           | Concurrent checker threads                    |
 | SNIPER_LEAD_TIME_SECONDS         | 120          | Seconds before predicted drop to start polling|
 | SNIPER_POLL_INTERVAL_MS          | 500          | Polling interval during final countdown (ms)  |
+| SNIPER_DRY_RUN                   | false        | Use mock sniper locally without registrar APIs |
 
 ---
 

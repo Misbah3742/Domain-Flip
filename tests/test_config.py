@@ -43,3 +43,4 @@ class TestSettingsDefaults:
     def test_sniper_defaults(self):
         assert self.s.sniper_lead_time_seconds >= 0
         assert self.s.sniper_poll_interval_ms >= 1
+        assert self.s.sniper_dry_run is False

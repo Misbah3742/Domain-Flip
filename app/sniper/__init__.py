@@ -223,6 +223,34 @@ class NamejetClient(RegistrarClient):
         self._http.close()
 
 
+class MockRegistrarClient(RegistrarClient):
+    """Local test registrar that never calls external APIs."""
+
+    @property
+    def name(self) -> str:
+        return "mock"
+
+    def register(self, domain: str) -> RegistrationResult:
+        logger.info("sniper[mock]: simulated successful registration for %s", domain)
+        return RegistrationResult(
+            domain_name=domain,
+            registrar=self.name,
+            result=SnipeResult.SUCCESS,
+        )
+
+
+def _build_registrar_clients() -> list[RegistrarClient]:
+    if settings.sniper_dry_run:
+        return [MockRegistrarClient()]
+
+    clients: list[RegistrarClient] = []
+    if settings.dynadot_api_key.strip():
+        clients.append(DynadotClient())
+    if settings.namejet_api_key.strip() and settings.namejet_api_secret.strip():
+        clients.append(NamejetClient())
+    return clients
+
+
 # ─── RQ job entry point ───────────────────────────────────────────────────────
 
 def attempt_registration(domain_name: str) -> RegistrationResult:
@@ -238,10 +266,20 @@ def attempt_registration(domain_name: str) -> RegistrationResult:
     """
     logger.info("sniper: starting watch for %s", domain_name)
 
-    clients: list[RegistrarClient] = [DynadotClient(), NamejetClient()]
+    clients = _build_registrar_clients()
 
     if not clients:
-        raise ValueError("No registrar clients configured")
+        result = RegistrationResult(
+            domain_name=domain_name,
+            registrar="none",
+            result=SnipeResult.FAILURE,
+            error_message=(
+                "No registrar clients configured. Set SNIPER_DRY_RUN=true for local "
+                "testing or provide registrar API keys."
+            ),
+        )
+        _persist_result(result)
+        return result
 
     poll_interval = settings.sniper_poll_interval_ms / 1000.0
 

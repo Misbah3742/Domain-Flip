@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     # ── Sniper timing ──────────────────────────────────────────────────────────
     sniper_lead_time_seconds: int = 120
     sniper_poll_interval_ms: int = 500
+    sniper_dry_run: bool = False
 
 
 # Module-level singleton – import this in other modules.

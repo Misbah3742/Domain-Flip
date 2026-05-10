@@ -44,15 +44,31 @@ class Settings(BaseSettings):
 
     # ── WhoisXML API ───────────────────────────────────────────────────────────
     whoisxml_api_key: str = ""
+    whoisxml_api_url: str = "https://www.whoisxmlapi.com/whoisserver/WhoisService"
+
+    # ── Domain valuation API ──────────────────────────────────────────────────
+    valuation_api_key: str = ""
+    valuation_api_url: str = "https://api.estibot.com/v1/valuation"
+    valuation_min_usd: float = 500.0
 
     # ── Registrar APIs ─────────────────────────────────────────────────────────
     dynadot_api_key: str = ""
     namejet_api_key: str = ""
     namejet_api_secret: str = ""
+    registrar_proxy_url: str = ""
+    registrar_cooldown_seconds: int = 60
+
+    # ── Notifications ─────────────────────────────────────────────────────────
+    discord_webhook_url: str = ""
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    notification_timeout_seconds: int = 10
 
     # ── Monitor tuning ─────────────────────────────────────────────────────────
     monitor_check_interval_seconds: int = 30
     monitor_max_workers: int = 10
+    monitor_concurrency: int = 100
+    monitor_request_timeout_seconds: int = 10
 
     # ── Sniper timing ──────────────────────────────────────────────────────────
     sniper_lead_time_seconds: int = 120

@@ -47,6 +47,7 @@ class SnipeResult(str, enum.Enum):
     SUCCESS = "success"
     FAILURE = "failure"
     ALREADY_REGISTERED = "already_registered"
+    SKIPPED_LOW_VALUE = "skipped_low_value"
 
 
 # ─── ORM Base ─────────────────────────────────────────────────────────────────

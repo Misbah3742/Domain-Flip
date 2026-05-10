@@ -10,6 +10,7 @@ check_domain()      Top-level function invoked by RQ workers.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -17,6 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
+
+import httpx
 
 from app.config import settings
 from app.database import DomainStatus
@@ -85,36 +88,155 @@ class CheckResult:
             self.checked_at = datetime.now(timezone.utc)
 
 
-# ─── Single-domain checker function (used as RQ job) ─────────────────────────
+# ─── Async WHOIS client ───────────────────────────────────────────────────────
+
+class AsyncWhoisXMLClient:
+    """Non-blocking WhoisXML client used by the high-concurrency monitor path."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_url: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> None:
+        self._api_key = api_key or settings.whoisxml_api_key
+        self._api_url = api_url or settings.whoisxml_api_url
+        self._http = httpx.AsyncClient(
+            timeout=timeout_seconds or settings.monitor_request_timeout_seconds,
+        )
+
+    async def lookup(self, domain_name: str) -> dict:
+        if not self._api_key:
+            return {}
+
+        response = await self._http.get(
+            self._api_url,
+            params={
+                "apiKey": self._api_key,
+                "domainName": domain_name,
+                "outputFormat": "JSON",
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+
+def _parse_expires_at(payload: dict) -> Optional[datetime]:
+    whois_record = payload.get("WhoisRecord", {})
+    registry_data = whois_record.get("registryData", {})
+
+    expires_raw = registry_data.get("expiresDate") or whois_record.get(
+        "expiresDate"
+    )
+    if not expires_raw:
+        return None
+
+    try:
+        return datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _classify_status(expires_at: Optional[datetime]) -> DomainStatus:
+    if expires_at is None:
+        return DomainStatus.ACTIVE
+
+    now = datetime.now(timezone.utc)
+    delta_seconds = (expires_at - now).total_seconds()
+
+    if delta_seconds > 30 * 24 * 60 * 60:
+        return DomainStatus.ACTIVE
+    if delta_seconds > 0:
+        return DomainStatus.EXPIRING_SOON
+    if delta_seconds >= -5 * 24 * 60 * 60:
+        return DomainStatus.REDEMPTION
+    if delta_seconds >= -40 * 24 * 60 * 60:
+        return DomainStatus.PENDING_DELETE
+    return DomainStatus.AVAILABLE
+
+
+async def check_domain_async(
+    domain_name: str,
+    client: AsyncWhoisXMLClient | None = None,
+) -> CheckResult:
+    """Asynchronously check one domain and return a lifecycle snapshot."""
+    owns_client = client is None
+    client = client or AsyncWhoisXMLClient()
+
+    try:
+        payload = await client.lookup(domain_name)
+        expires_at = _parse_expires_at(payload)
+        result = CheckResult(
+            domain_name=domain_name,
+            status=_classify_status(expires_at),
+            expires_at=expires_at,
+        )
+
+        if result.status == DomainStatus.PENDING_DELETE:
+            _enqueue_for_sniping(domain_name)
+
+        return result
+    except httpx.HTTPError as exc:
+        logger.warning("monitor: async WHOIS lookup failed for %s: %s", domain_name, exc)
+        return CheckResult(
+            domain_name=domain_name,
+            status=DomainStatus.ACTIVE,
+            expires_at=None,
+        )
+    finally:
+        if owns_client:
+            await client.aclose()
+
+
+class AsyncDomainChecker:
+    """High-concurrency batch checker built on top of httpx.AsyncClient."""
+
+    def __init__(
+        self,
+        concurrency: int | None = None,
+        client: AsyncWhoisXMLClient | None = None,
+    ) -> None:
+        self._concurrency = concurrency or settings.monitor_concurrency
+        self._client = client or AsyncWhoisXMLClient()
+        self._owns_client = client is None
+
+    async def check_domain(self, domain_name: str) -> CheckResult:
+        return await check_domain_async(domain_name, client=self._client)
+
+    async def check_domains(self, domain_names: list[str]) -> list[CheckResult]:
+        semaphore = asyncio.Semaphore(self._concurrency)
+
+        async def guarded_check(domain_name: str) -> CheckResult:
+            async with semaphore:
+                return await self.check_domain(domain_name)
+
+        try:
+            return await asyncio.gather(
+                *(guarded_check(domain_name) for domain_name in domain_names)
+            )
+        finally:
+            if self._owns_client:
+                await self._client.aclose()
+
 
 def check_domain(domain_name: str) -> CheckResult:
-    """
-    Perform a WHOIS / registry status check for *domain_name*.
+    """Compatibility wrapper used by the existing RQ job entrypoint."""
+    return asyncio.run(check_domain_async(domain_name))
 
-    This function is the unit of work dispatched to RQ workers.  It:
-    1. Looks up the domain via WHOIS (or the WhoisXML API).
-    2. Determines the current lifecycle status.
-    3. Persists the updated status to PostgreSQL.
-    4. If the domain is in PENDING_DELETE, enqueues it for sniping.
 
-    Returns
-    -------
-    CheckResult
-        The resolved status and expiry date.
-    """
-    logger.info("monitor: checking domain %s", domain_name)
+async def check_domains_async(domain_names: list[str]) -> list[CheckResult]:
+    """Convenience helper for batch checking many domains concurrently."""
+    checker = AsyncDomainChecker()
+    return await checker.check_domains(domain_names)
 
-    # TODO: replace stub with real WHOIS lookup + DB update
-    result = CheckResult(
-        domain_name=domain_name,
-        status=DomainStatus.ACTIVE,
-        expires_at=None,
-    )
 
-    if result.status == DomainStatus.PENDING_DELETE:
-        _enqueue_for_sniping(domain_name)
-
-    return result
+# ─── Single-domain checker function (used as RQ job) ─────────────────────────
+def _legacy_check_domain(domain_name: str) -> CheckResult:
+    """Backward-compatible alias retained for older imports."""
+    return check_domain(domain_name)
 
 
 def _enqueue_for_sniping(domain_name: str) -> None:

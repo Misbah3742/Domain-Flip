@@ -740,7 +740,12 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
             )
 
         logger.info("sniper[namecheap]: registering %s", domain)
-        sld, _, tld = domain.partition(".")
+        # Use rsplit to correctly handle multi-label domains: "sub.example.com" →
+        # sld="sub.example", tld="com".  Namecheap expects the full domain name
+        # minus the last label as DomainName, and the last label as TLD.
+        parts = domain.rsplit(".", 1)
+        sld = parts[0] if len(parts) == 2 else domain
+        tld = parts[1] if len(parts) == 2 else ""
 
         # Build the same contact block for all four roles required by Namecheap
         contact = {

@@ -108,7 +108,7 @@ def main() -> None:
     init_db(engine)
     SessionFactory = get_session_factory(engine)
 
-    limit = int(os.environ.get("CHECK_LIMIT", "0") or "0")
+    limit = int(os.environ.get("CHECK_LIMIT", "0"))
 
     with SessionFactory() as session:
         query = session.query(Domain.name)

@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     dynadot_api_key: str = ""
     namejet_api_key: str = ""
     namejet_api_secret: str = ""
+    godaddy_api_key: str = ""
+    godaddy_api_secret: str = ""
+    namecheap_api_key: str = ""
+    namecheap_api_user: str = ""
+    namecheap_client_ip: str = ""
     registrar_proxy_url: str = ""
     registrar_cooldown_seconds: int = 60
 

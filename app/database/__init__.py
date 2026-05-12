@@ -63,7 +63,7 @@ class Domain(Base):
 
     __tablename__ = "domains"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     name = Column(String(253), nullable=False, unique=True, index=True)
     tld = Column(String(63), nullable=False, index=True)
 
@@ -100,10 +100,8 @@ class DomainMetrics(Base):
 
     __tablename__ = "domain_metrics"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    domain_id = Column(BigInteger, nullable=False, index=True)
-
-    domain_authority = Column(Float, nullable=True)   # Moz DA (0-100)
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    domain_id = Column(BigInteger().with_variant(Integer, "sqlite"), nullable=False, index=True)
     estimated_value_usd = Column(Float, nullable=True)
     backlink_count = Column(Integer, nullable=True)
     referring_domains = Column(Integer, nullable=True)
@@ -120,8 +118,8 @@ class SnipeAttempt(Base):
 
     __tablename__ = "snipe_attempts"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    domain_id = Column(BigInteger, nullable=False, index=True)
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    domain_id = Column(BigInteger().with_variant(Integer, "sqlite"), nullable=False, index=True)
 
     registrar = Column(String(64), nullable=False)   # "dynadot" | "namejet"
     result = Column(Enum(SnipeResult), nullable=False)

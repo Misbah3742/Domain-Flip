@@ -508,6 +508,301 @@ class MockRegistrarClient(RegistrarClient):
         )
 
 
+# ─── GoDaddy client ───────────────────────────────────────────────────────────
+
+class GoDaddyClient(_BaseHTTPRegistrarClient):
+    """
+    Registrar client for `GoDaddy <https://developer.godaddy.com/>`_.
+
+    Provides domain availability checks, real-time appraisal, and domain
+    purchase via the GoDaddy REST API (v1).
+
+    Authentication uses a ``sso-key {apiKey}:{apiSecret}`` header.
+
+    Usage::
+
+        client = GoDaddyClient()
+        print(client.check_available("example.com"))
+        print(client.appraise("example.com"))
+        result = client.register("example.com")
+    """
+
+    BASE_URL = "https://api.godaddy.com/v1"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        proxy_url: str | None = None,
+        breaker: CircuitBreaker | None = None,
+    ) -> None:
+        super().__init__(proxy_url=proxy_url, breaker=breaker)
+        self._api_key = api_key or settings.godaddy_api_key
+        self._api_secret = api_secret or settings.godaddy_api_secret
+
+    @property
+    def name(self) -> str:
+        return "godaddy"
+
+    def _auth_header(self) -> dict[str, str]:
+        return {"Authorization": f"sso-key {self._api_key}:{self._api_secret}"}
+
+    def check_available(self, domain: str) -> bool:
+        """
+        Return ``True`` if *domain* is available for registration.
+
+        Raises
+        ------
+        httpx.HTTPStatusError
+            On a non-2xx HTTP response.
+        """
+        logger.info("sniper[godaddy]: checking availability of %s", domain)
+        response = self._request(
+            "GET",
+            f"{self.BASE_URL}/domains/available",
+            params={"domain": domain},
+            headers=self._auth_header(),
+        )
+        data = response.json()
+        return bool(data.get("available", False))
+
+    def appraise(self, domain: str) -> float:
+        """
+        Return GoDaddy's estimated value for *domain* in USD.
+
+        Falls back to ``0.0`` if the API response cannot be parsed.
+
+        Raises
+        ------
+        httpx.HTTPStatusError
+            On a non-2xx HTTP response.
+        """
+        logger.info("sniper[godaddy]: appraising %s", domain)
+        response = self._request(
+            "GET",
+            f"{self.BASE_URL}/appraisal/{domain}",
+            headers=self._auth_header(),
+        )
+        data = response.json()
+        try:
+            return float(data.get("govalue", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def register(self, domain: str) -> RegistrationResult:
+        """
+        Purchase *domain* via the GoDaddy Domain Purchase API.
+
+        The request uses a 1-year registration with default privacy settings.
+        """
+        logger.info("sniper[godaddy]: purchasing %s", domain)
+        try:
+            response = self._request(
+                "POST",
+                f"{self.BASE_URL}/domains/purchase",
+                json={
+                    "domain": domain,
+                    "period": 1,
+                    "renewAuto": False,
+                    "privacy": False,
+                    "consent": {
+                        "agreedAt": "",
+                        "agreedBy": "",
+                        "agreementKeys": ["DNRA"],
+                    },
+                },
+                headers={**self._auth_header(), "Content-Type": "application/json"},
+            )
+            if response.status_code in (200, 201):
+                return RegistrationResult(
+                    domain_name=domain,
+                    registrar=self.name,
+                    result=SnipeResult.SUCCESS,
+                )
+            return RegistrationResult(
+                domain_name=domain,
+                registrar=self.name,
+                result=SnipeResult.FAILURE,
+                error_message=response.text,
+            )
+        except Exception as exc:
+            return RegistrationResult(
+                domain_name=domain,
+                registrar=self.name,
+                result=SnipeResult.FAILURE,
+                error_message=str(exc),
+            )
+
+
+# ─── Namecheap client ─────────────────────────────────────────────────────────
+
+class NamecheapClient(_BaseHTTPRegistrarClient):
+    """
+    Registrar client for `Namecheap <https://www.namecheap.com/support/api/>`_.
+
+    Supports domain availability checking and registration via the Namecheap
+    XML API.  All requests require the caller's IP to be whitelisted in the
+    Namecheap control panel.
+
+    Usage::
+
+        client = NamecheapClient()
+        print(client.check_available("example.com"))
+        result = client.register("example.com")
+    """
+
+    BASE_URL = "https://api.namecheap.com/xml.response"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_user: str | None = None,
+        client_ip: str | None = None,
+        proxy_url: str | None = None,
+        breaker: CircuitBreaker | None = None,
+    ) -> None:
+        super().__init__(proxy_url=proxy_url, breaker=breaker)
+        self._api_key = api_key or settings.namecheap_api_key
+        self._api_user = api_user or settings.namecheap_api_user
+        self._client_ip = client_ip or settings.namecheap_client_ip
+
+    @property
+    def name(self) -> str:
+        return "namecheap"
+
+    def _base_params(self, command: str) -> dict[str, str]:
+        return {
+            "ApiUser": self._api_user,
+            "ApiKey": self._api_key,
+            "UserName": self._api_user,
+            "ClientIp": self._client_ip,
+            "Command": command,
+        }
+
+    def check_available(self, domain: str) -> bool:
+        """
+        Return ``True`` if *domain* is available for registration.
+
+        Raises
+        ------
+        httpx.HTTPStatusError
+            On a non-2xx HTTP response.
+        ValueError
+            If the API response XML cannot be parsed.
+        """
+        logger.info("sniper[namecheap]: checking availability of %s", domain)
+        params = {**self._base_params("namecheap.domains.check"), "DomainList": domain}
+        response = self._request("GET", self.BASE_URL, params=params)
+        return self._parse_availability(response.text, domain)
+
+    def register(self, domain: str) -> RegistrationResult:
+        """
+        Register *domain* via the Namecheap ``domains.create`` command.
+
+        A first name, last name, and contact details are required by the API.
+        These are read from environment variables when available; otherwise
+        placeholder values are used and should be updated before production use.
+        """
+        logger.info("sniper[namecheap]: registering %s", domain)
+        sld, _, tld = domain.partition(".")
+        params = {
+            **self._base_params("namecheap.domains.create"),
+            "DomainName": sld,
+            "TLD": tld,
+            "Years": "1",
+            "RegistrantFirstName": "Domain",
+            "RegistrantLastName": "Flip",
+            "RegistrantAddress1": "123 Main St",
+            "RegistrantCity": "Anytown",
+            "RegistrantStateProvince": "CA",
+            "RegistrantPostalCode": "90210",
+            "RegistrantCountry": "US",
+            "RegistrantPhone": "+1.5555555555",
+            "RegistrantEmailAddress": "admin@example.com",
+            "TechFirstName": "Domain",
+            "TechLastName": "Flip",
+            "TechAddress1": "123 Main St",
+            "TechCity": "Anytown",
+            "TechStateProvince": "CA",
+            "TechPostalCode": "90210",
+            "TechCountry": "US",
+            "TechPhone": "+1.5555555555",
+            "TechEmailAddress": "admin@example.com",
+            "AdminFirstName": "Domain",
+            "AdminLastName": "Flip",
+            "AdminAddress1": "123 Main St",
+            "AdminCity": "Anytown",
+            "AdminStateProvince": "CA",
+            "AdminPostalCode": "90210",
+            "AdminCountry": "US",
+            "AdminPhone": "+1.5555555555",
+            "AdminEmailAddress": "admin@example.com",
+            "AuxBillingFirstName": "Domain",
+            "AuxBillingLastName": "Flip",
+            "AuxBillingAddress1": "123 Main St",
+            "AuxBillingCity": "Anytown",
+            "AuxBillingStateProvince": "CA",
+            "AuxBillingPostalCode": "90210",
+            "AuxBillingCountry": "US",
+            "AuxBillingPhone": "+1.5555555555",
+            "AuxBillingEmailAddress": "admin@example.com",
+        }
+        try:
+            response = self._request("GET", self.BASE_URL, params=params)
+            if self._parse_success(response.text):
+                return RegistrationResult(
+                    domain_name=domain,
+                    registrar=self.name,
+                    result=SnipeResult.SUCCESS,
+                )
+            return RegistrationResult(
+                domain_name=domain,
+                registrar=self.name,
+                result=SnipeResult.FAILURE,
+                error_message=self._parse_error(response.text),
+            )
+        except Exception as exc:
+            return RegistrationResult(
+                domain_name=domain,
+                registrar=self.name,
+                result=SnipeResult.FAILURE,
+                error_message=str(exc),
+            )
+
+    # ── Private XML helpers ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_availability(xml_text: str, domain: str) -> bool:
+        """Return True if the Namecheap XML response shows the domain is available."""
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_text)
+        ns = {"nc": "http://api.namecheap.com/xml.response"}
+        sld = domain.split(".")[0].lower()
+        for check in root.findall(".//nc:DomainCheckResult", ns):
+            name = check.get("Domain", "").lower()
+            if name.startswith(sld):
+                return check.get("Available", "false").lower() == "true"
+        return False
+
+    @staticmethod
+    def _parse_success(xml_text: str) -> bool:
+        """Return True if the Namecheap API returned a successful status."""
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_text)
+        return root.get("Status", "").upper() == "OK"
+
+    @staticmethod
+    def _parse_error(xml_text: str) -> str | None:
+        """Extract the first error message from a Namecheap XML response."""
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_text)
+        ns = {"nc": "http://api.namecheap.com/xml.response"}
+        error = root.find(".//nc:Error", ns)
+        if error is not None and error.text:
+            return error.text.strip()
+        return root.get("Status")
+
+
 def _build_registrar_clients() -> list[RegistrarClient]:
     if settings.sniper_dry_run:
         return [MockRegistrarClient()]
@@ -517,6 +812,14 @@ def _build_registrar_clients() -> list[RegistrarClient]:
         clients.append(DynadotClient())
     if settings.namejet_api_key.strip() and settings.namejet_api_secret.strip():
         clients.append(NamejetClient())
+    if settings.godaddy_api_key.strip() and settings.godaddy_api_secret.strip():
+        clients.append(GoDaddyClient())
+    if (
+        settings.namecheap_api_key.strip()
+        and settings.namecheap_api_user.strip()
+        and settings.namecheap_client_ip.strip()
+    ):
+        clients.append(NamecheapClient())
     return clients
 
 

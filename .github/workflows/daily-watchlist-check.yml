@@ -33,6 +33,8 @@ jobs:
   watchlist-check:
     name: Check watchlist domains
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     env:
       POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}

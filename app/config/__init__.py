@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     namecheap_api_key: str = ""
     namecheap_api_user: str = ""
     namecheap_client_ip: str = ""
+    # Contact details used for Namecheap domain registrations (required by API)
+    namecheap_registrant_first_name: str = ""
+    namecheap_registrant_last_name: str = ""
+    namecheap_registrant_address: str = ""
+    namecheap_registrant_city: str = ""
+    namecheap_registrant_state: str = ""
+    namecheap_registrant_postal_code: str = ""
+    namecheap_registrant_country: str = "US"
+    namecheap_registrant_phone: str = ""
+    namecheap_registrant_email: str = ""
     registrar_proxy_url: str = ""
     registrar_cooldown_seconds: int = 60
 

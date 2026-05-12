@@ -226,6 +226,16 @@ class TestNamecheapClient:
         assert called_params.get("Command") == "namecheap.domains.check"
 
     def test_register_returns_success_on_ok_response(self, monkeypatch):
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_first_name", "John")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_last_name", "Doe")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_email", "john@example.com")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_phone", "+1.2125551234")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_address", "123 Main St")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_city", "New York")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_state", "NY")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_postal_code", "10001")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_country", "US")
+
         class FakeResponse:
             status_code = 200
             text = (
@@ -247,7 +257,28 @@ class TestNamecheapClient:
         assert result.result == SnipeResult.SUCCESS
         assert result.registrar == "namecheap"
 
+    def test_register_returns_failure_when_contact_info_missing(self, monkeypatch):
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_first_name", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_last_name", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_email", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_phone", "")
+
+        client = NamecheapClient(api_key="k", api_user="u", client_ip="1.2.3.4")
+        result = client.register("newdomain.com")
+        assert result.result == SnipeResult.FAILURE
+        assert "contact info" in (result.error_message or "").lower()
+
     def test_register_returns_failure_on_error_response(self, monkeypatch):
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_first_name", "John")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_last_name", "Doe")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_email", "john@example.com")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_phone", "+1.2125551234")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_address", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_city", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_state", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_postal_code", "")
+        monkeypatch.setattr(sniper_module.settings, "namecheap_registrant_country", "US")
+
         class FakeResponse:
             status_code = 200
             text = (

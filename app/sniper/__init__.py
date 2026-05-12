@@ -594,7 +594,12 @@ class GoDaddyClient(_BaseHTTPRegistrarClient):
         Purchase *domain* via the GoDaddy Domain Purchase API.
 
         The request uses a 1-year registration with default privacy settings.
+        ``agreedAt`` is set to the current UTC timestamp in ISO-8601 format and
+        ``agreedBy`` is populated from the API key so GoDaddy can identify the
+        consenting party.  Both fields are required by the GoDaddy API.
         """
+        import datetime as _dt
+        agreed_at = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         logger.info("sniper[godaddy]: purchasing %s", domain)
         try:
             response = self._request(
@@ -606,8 +611,8 @@ class GoDaddyClient(_BaseHTTPRegistrarClient):
                     "renewAuto": False,
                     "privacy": False,
                     "consent": {
-                        "agreedAt": "",
-                        "agreedBy": "",
+                        "agreedAt": agreed_at,
+                        "agreedBy": self._api_key,
                         "agreementKeys": ["DNRA"],
                     },
                 },
@@ -699,53 +704,65 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
         """
         Register *domain* via the Namecheap ``domains.create`` command.
 
-        A first name, last name, and contact details are required by the API.
-        These are read from environment variables when available; otherwise
-        placeholder values are used and should be updated before production use.
+        Registrant contact fields are read from the ``NAMECHEAP_REGISTRANT_*``
+        environment variables (via :class:`~app.config.Settings`).  If required
+        fields (first name, last name, email) are not set, registration is
+        aborted and a descriptive error is returned rather than submitting an
+        invalid request to the API.
         """
+        first = settings.namecheap_registrant_first_name
+        last = settings.namecheap_registrant_last_name
+        email = settings.namecheap_registrant_email
+        phone = settings.namecheap_registrant_phone
+        address = settings.namecheap_registrant_address
+        city = settings.namecheap_registrant_city
+        state = settings.namecheap_registrant_state
+        postal = settings.namecheap_registrant_postal_code
+        country = settings.namecheap_registrant_country or "US"
+
+        missing = [
+            name for name, val in (
+                ("NAMECHEAP_REGISTRANT_FIRST_NAME", first),
+                ("NAMECHEAP_REGISTRANT_LAST_NAME", last),
+                ("NAMECHEAP_REGISTRANT_EMAIL", email),
+                ("NAMECHEAP_REGISTRANT_PHONE", phone),
+            )
+            if not val.strip()
+        ]
+        if missing:
+            msg = "Namecheap registration requires contact info. Missing: " + ", ".join(missing)
+            logger.error("sniper[namecheap]: %s", msg)
+            return RegistrationResult(
+                domain_name=domain,
+                registrar=self.name,
+                result=SnipeResult.FAILURE,
+                error_message=msg,
+            )
+
         logger.info("sniper[namecheap]: registering %s", domain)
         sld, _, tld = domain.partition(".")
+
+        # Build the same contact block for all four roles required by Namecheap
+        contact = {
+            "FirstName": first,
+            "LastName": last,
+            "Address1": address,
+            "City": city,
+            "StateProvince": state,
+            "PostalCode": postal,
+            "Country": country,
+            "Phone": phone,
+            "EmailAddress": email,
+        }
         params = {
             **self._base_params("namecheap.domains.create"),
             "DomainName": sld,
             "TLD": tld,
             "Years": "1",
-            "RegistrantFirstName": "Domain",
-            "RegistrantLastName": "Flip",
-            "RegistrantAddress1": "123 Main St",
-            "RegistrantCity": "Anytown",
-            "RegistrantStateProvince": "CA",
-            "RegistrantPostalCode": "90210",
-            "RegistrantCountry": "US",
-            "RegistrantPhone": "+1.5555555555",
-            "RegistrantEmailAddress": "admin@example.com",
-            "TechFirstName": "Domain",
-            "TechLastName": "Flip",
-            "TechAddress1": "123 Main St",
-            "TechCity": "Anytown",
-            "TechStateProvince": "CA",
-            "TechPostalCode": "90210",
-            "TechCountry": "US",
-            "TechPhone": "+1.5555555555",
-            "TechEmailAddress": "admin@example.com",
-            "AdminFirstName": "Domain",
-            "AdminLastName": "Flip",
-            "AdminAddress1": "123 Main St",
-            "AdminCity": "Anytown",
-            "AdminStateProvince": "CA",
-            "AdminPostalCode": "90210",
-            "AdminCountry": "US",
-            "AdminPhone": "+1.5555555555",
-            "AdminEmailAddress": "admin@example.com",
-            "AuxBillingFirstName": "Domain",
-            "AuxBillingLastName": "Flip",
-            "AuxBillingAddress1": "123 Main St",
-            "AuxBillingCity": "Anytown",
-            "AuxBillingStateProvince": "CA",
-            "AuxBillingPostalCode": "90210",
-            "AuxBillingCountry": "US",
-            "AuxBillingPhone": "+1.5555555555",
-            "AuxBillingEmailAddress": "admin@example.com",
+            **{f"Registrant{k}": v for k, v in contact.items()},
+            **{f"Tech{k}": v for k, v in contact.items()},
+            **{f"Admin{k}": v for k, v in contact.items()},
+            **{f"AuxBilling{k}": v for k, v in contact.items()},
         }
         try:
             response = self._request("GET", self.BASE_URL, params=params)

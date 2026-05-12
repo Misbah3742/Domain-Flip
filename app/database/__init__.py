@@ -102,6 +102,8 @@ class DomainMetrics(Base):
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     domain_id = Column(BigInteger().with_variant(Integer, "sqlite"), nullable=False, index=True)
+
+    domain_authority = Column(Float, nullable=True)   # Moz DA (0-100)
     estimated_value_usd = Column(Float, nullable=True)
     backlink_count = Column(Integer, nullable=True)
     referring_domains = Column(Integer, nullable=True)

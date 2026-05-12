@@ -15,6 +15,7 @@ import abc
 import contextlib
 import logging
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -598,8 +599,7 @@ class GoDaddyClient(_BaseHTTPRegistrarClient):
         ``agreedBy`` is populated from the API key so GoDaddy can identify the
         consenting party.  Both fields are required by the GoDaddy API.
         """
-        import datetime as _dt
-        agreed_at = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        agreed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         logger.info("sniper[godaddy]: purchasing %s", domain)
         try:
             response = self._request(
@@ -727,7 +727,7 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
                 ("NAMECHEAP_REGISTRANT_EMAIL", email),
                 ("NAMECHEAP_REGISTRANT_PHONE", phone),
             )
-            if not val.strip()
+            if not (val or "").strip()
         ]
         if missing:
             msg = "Namecheap registration requires contact info. Missing: " + ", ".join(missing)
@@ -791,7 +791,6 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
     @staticmethod
     def _parse_availability(xml_text: str, domain: str) -> bool:
         """Return True if the Namecheap XML response shows the domain is available."""
-        import xml.etree.ElementTree as ET
         root = ET.fromstring(xml_text)
         ns = {"nc": "http://api.namecheap.com/xml.response"}
         sld = domain.split(".")[0].lower()
@@ -804,14 +803,12 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
     @staticmethod
     def _parse_success(xml_text: str) -> bool:
         """Return True if the Namecheap API returned a successful status."""
-        import xml.etree.ElementTree as ET
         root = ET.fromstring(xml_text)
         return root.get("Status", "").upper() == "OK"
 
     @staticmethod
     def _parse_error(xml_text: str) -> str | None:
         """Extract the first error message from a Namecheap XML response."""
-        import xml.etree.ElementTree as ET
         root = ET.fromstring(xml_text)
         ns = {"nc": "http://api.namecheap.com/xml.response"}
         error = root.find(".//nc:Error", ns)

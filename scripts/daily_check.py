@@ -67,6 +67,8 @@ async def _check_and_update(
         return summary
 
     with SessionFactory() as session:
+        # Capture the update timestamp once so all domain updates have the same time
+        update_time = datetime.now(timezone.utc)
         for result in results:
             summary["checked"] += 1
             try:
@@ -81,7 +83,7 @@ async def _check_and_update(
 
                 domain.status = result.status
                 domain.expires_at = result.expires_at
-                domain.updated_at = datetime.now(timezone.utc)
+                domain.updated_at = update_time
 
                 if result.status == DomainStatus.PENDING_DELETE:
                     summary["pending_delete"] += 1

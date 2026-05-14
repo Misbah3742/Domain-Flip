@@ -744,8 +744,17 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
         # sld="sub.example", tld="com".  Namecheap expects the full domain name
         # minus the last label as DomainName, and the last label as TLD.
         parts = domain.rsplit(".", 1)
-        sld = parts[0] if len(parts) == 2 else domain
-        tld = parts[1] if len(parts) == 2 else ""
+        if len(parts) != 2:
+            msg = f"Namecheap requires a domain with a TLD (e.g., 'example.com'), got {domain!r}"
+            logger.error("sniper[namecheap]: %s", msg)
+            return RegistrationResult(
+                domain_name=domain,
+                registrar=self.name,
+                result=SnipeResult.FAILURE,
+                error_message=msg,
+            )
+        sld = parts[0]
+        tld = parts[1]
 
         # Build the same contact block for all four roles required by Namecheap
         contact = {
@@ -798,12 +807,11 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
         """Return True if the Namecheap XML response shows the domain is available."""
         root = ET.fromstring(xml_text)
         ns = {"nc": "http://api.namecheap.com/xml.response"}
-        # For multi-label domains, extract the first label; for single-label domains,
-        # use the whole domain name
-        sld = domain.split(".")[0].lower() if "." in domain else domain.lower()
+        # Extract the full domain to search for an exact match in the XML response
+        domain_lower = domain.lower()
         for check in root.findall(".//nc:DomainCheckResult", ns):
             name = check.get("Domain", "").lower()
-            if name.startswith(sld):
+            if name == domain_lower:
                 return check.get("Available", "false").lower() == "true"
         return False
 

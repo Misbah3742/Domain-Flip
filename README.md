@@ -70,6 +70,8 @@ RQ-backed queue management:
 - **`RegistrarClient`** - abstract base class for registrar adapters
 - **`DynadotClient`** - Dynadot REST API integration (register command)
 - **`NamejetClient`** - Namejet back-order API integration
+- **`GoDaddyClient`** - GoDaddy API integration: availability check (`check_available`), real-time appraisal (`appraise`), and domain purchase (`register`)
+- **`NamecheapClient`** - Namecheap XML API integration: availability check and domain registration
 - **`attempt_registration()`** - RQ job: polls and retries registration until success or failure
 
 ### `app/trademark_filter`
@@ -80,10 +82,12 @@ RQ-backed queue management:
 ### `app/api`
 FastAPI application exposing:
 - `GET /health` - liveness probe
-- `GET /domains` - paginated domain list
-- `POST /domains` - add a domain (trademark-checked first)
+- `GET /check-domain/{name}` - live WHOIS lookup; returns current status without requiring a DB record
+- `GET /domains` - paginated domain list (filterable by `status`)
+- `POST /domains` - add a domain (trademark-checked, persisted to DB, queued for WHOIS check)
+- `DELETE /domains/{name}` - remove a domain from the watchlist
 - `POST /domains/{name}/snipe` - manual snipe trigger
-- `GET /metrics/{name}` - valuation metrics
+- `GET /metrics/{name}` - latest valuation metrics
 
 ---
 
@@ -136,15 +140,46 @@ pytest tests/ -v
 | POSTGRES_USER                    | domainflip   | Database user                                 |
 | POSTGRES_PASSWORD                | changeme     | Database password                             |
 | REDIS_HOST                       | redis        | Redis hostname                                |
-| WHOISXML_API_KEY                 | -            | WhoisXML API key                              |
-| DYNADOT_API_KEY                  | -            | Dynadot API key                               |
+| WHOISXML_API_KEY                 | -            | WhoisXML API key ([console](https://www.whoisxmlapi.com/)) |
+| GODADDY_API_KEY                  | -            | GoDaddy API key ([portal](https://developer.godaddy.com/)) |
+| GODADDY_API_SECRET               | -            | GoDaddy API secret                            |
+| DYNADOT_API_KEY                  | -            | Dynadot API key ([panel](https://www.dynadot.com/domain/api2.html)) |
 | NAMEJET_API_KEY                  | -            | Namejet API key                               |
 | NAMEJET_API_SECRET               | -            | Namejet API secret                            |
+| NAMECHEAP_API_KEY                | -            | Namecheap API key ([access](https://ap.www.namecheap.com/settings/tools/apiaccess/)) |
+| NAMECHEAP_API_USER               | -            | Namecheap account username                    |
+| NAMECHEAP_CLIENT_IP              | -            | Whitelisted client IP for Namecheap API       |
+| VALUATION_API_KEY                | -            | Valuation API key (e.g. Estibot)              |
+| DISCORD_WEBHOOK_URL              | -            | Discord webhook for snipe alerts              |
+| TELEGRAM_BOT_TOKEN               | -            | Telegram bot token for snipe alerts           |
+| TELEGRAM_CHAT_ID                 | -            | Telegram chat ID for snipe alerts             |
 | MONITOR_CHECK_INTERVAL_SECONDS   | 30           | Seconds between WHOIS re-checks               |
 | MONITOR_MAX_WORKERS              | 10           | Concurrent checker threads                    |
 | SNIPER_LEAD_TIME_SECONDS         | 120          | Seconds before predicted drop to start polling|
 | SNIPER_POLL_INTERVAL_MS          | 500          | Polling interval during final countdown (ms)  |
 | SNIPER_DRY_RUN                   | false        | Use mock sniper locally without registrar APIs |
+
+---
+
+## Automated Daily Watchlist Check (GitHub Actions)
+
+A scheduled GitHub Actions workflow (`.github/workflows/daily-watchlist-check.yml`)
+runs every day at 02:00 UTC, checking every domain in the watchlist against
+WhoisXML and updating their status in the database.
+
+To enable it, add these repository secrets in **Settings → Secrets and variables → Actions**:
+
+```
+POSTGRES_HOST       your-db-host
+POSTGRES_DB         domainflip
+POSTGRES_USER       domainflip
+POSTGRES_PASSWORD   your-db-password
+WHOISXML_API_KEY    your-whoisxml-key
+```
+
+You can also trigger it manually from the **Actions** tab using the
+**"Run workflow"** button, with an optional `limit` parameter to cap the
+number of domains processed.
 
 ---
 

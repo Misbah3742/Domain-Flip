@@ -1,0 +1,64 @@
+# .github/workflows/daily-watchlist-check.yml
+#
+# Runs a daily WHOIS status check for every domain in the PostgreSQL watchlist.
+# Results are written back to the database (status, expires_at) so the next
+# scheduled run has up-to-date data.
+#
+# Prerequisites – add these as GitHub Actions Secrets in your repository:
+#   POSTGRES_HOST        Hostname of your hosted PostgreSQL instance
+#   POSTGRES_PORT        (optional, defaults to 5432)
+#   POSTGRES_DB          Database name
+#   POSTGRES_USER        Database username
+#   POSTGRES_PASSWORD    Database password
+#   WHOISXML_API_KEY     WhoisXML API key for WHOIS lookups
+#   DEPLOYMENT_URL       (optional) Base URL of the deployed API, e.g.
+#                        https://your-app.onrender.com — when set, the workflow
+#                        will also call GET /check-domain/{name} for each domain.
+
+name: Daily Watchlist Check
+
+on:
+  schedule:
+    # Run every day at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    # Allow manual triggering from the GitHub Actions UI
+    inputs:
+      limit:
+        description: "Maximum number of domains to check (0 = all)"
+        required: false
+        default: "0"
+
+jobs:
+  watchlist-check:
+    name: Check watchlist domains
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_PORT || '5432' }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      WHOISXML_API_KEY: ${{ secrets.WHOISXML_API_KEY }}
+      DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily watchlist check
+        env:
+          CHECK_LIMIT: ${{ github.event.inputs.limit || '0' }}
+        run: python scripts/daily_check.py

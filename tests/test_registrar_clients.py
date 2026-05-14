@@ -352,7 +352,6 @@ class TestBuildRegistrarClientsExtended:
         monkeypatch.setattr(sniper_module.settings, "namecheap_api_user", "nc-user")
         monkeypatch.setattr(sniper_module.settings, "namecheap_client_ip", "1.2.3.4")
 
-        from app.sniper import DynadotClient, NamejetClient
         clients = _build_registrar_clients()
 
         assert len(clients) == 4

@@ -84,7 +84,16 @@ async def check_domain_live(name: str) -> dict:
 
     This endpoint calls WhoisXML directly – no database record is required.
     Useful for ad-hoc checks before adding a domain to the watchlist.
+    Single-label domains (without a TLD) are rejected with HTTP 400 to ensure
+    consistency with the domain registration validation.
     """
+    # Validate that the domain has at least one dot (i.e., contains a TLD)
+    if "." not in name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Domain {name!r} must contain a TLD (e.g., 'example.com')",
+        )
+    
     result = await check_domain_async(name)
     return {
         "name": result.domain_name,

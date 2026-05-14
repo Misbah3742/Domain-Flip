@@ -153,7 +153,16 @@ def add_domain(req: AddDomainRequest, db: Session = Depends(get_db)) -> dict:
     The domain is first checked against the :mod:`~app.trademark_filter`
     before being persisted.  Flagged domains are rejected with HTTP 409.
     Already-tracked domains are also rejected with HTTP 409.
+    Single-label domains (e.g., 'localhost' without a TLD) are rejected
+    with HTTP 400.
     """
+    # Validate that the domain has at least one dot (i.e., contains a TLD)
+    if "." not in req.name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Domain {req.name!r} must contain a TLD (e.g., 'example.com')",
+        )
+
     tm_result = _trademark_filter.check(req.name)
     if tm_result.is_flagged:
         raise HTTPException(status_code=409, detail=tm_result.reason)
@@ -165,7 +174,7 @@ def add_domain(req: AddDomainRequest, db: Session = Depends(get_db)) -> dict:
             detail=f"Domain {req.name!r} is already being tracked",
         )
 
-    tld = req.name.rsplit(".", 1)[-1] if "." in req.name else ""
+    tld = req.name.rsplit(".", 1)[-1]
     domain = Domain(name=req.name, tld=tld, status=DomainStatus.ACTIVE)
     db.add(domain)
     db.commit()

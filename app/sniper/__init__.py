@@ -798,7 +798,9 @@ class NamecheapClient(_BaseHTTPRegistrarClient):
         """Return True if the Namecheap XML response shows the domain is available."""
         root = ET.fromstring(xml_text)
         ns = {"nc": "http://api.namecheap.com/xml.response"}
-        sld = domain.split(".")[0].lower()
+        # For multi-label domains, extract the first label; for single-label domains,
+        # use the whole domain name
+        sld = domain.split(".")[0].lower() if "." in domain else domain.lower()
         for check in root.findall(".//nc:DomainCheckResult", ns):
             name = check.get("Domain", "").lower()
             if name.startswith(sld):
